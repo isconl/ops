@@ -35,7 +35,14 @@ function sendJson(res, status, obj) {
 }
 
 /** Static-token check only, same shape every engine uses. */
+let _devAuthBypassLog = null; // set once main() creates auditLog; used by ISCONL_DEV_NO_AUTH (BS26090501)
+
 function checkAuth(req) {
+  // BS26090501: dev-only, loopback-gated (enforced at boot below), env-only -- never request-derived.
+  if (process.env.ISCONL_DEV_NO_AUTH === '1') {
+    if (_devAuthBypassLog) _devAuthBypassLog.log('dev_auth_bypass', { engine: 'ops', path: req.url });
+    return true;
+  }
   const token = process.env.OPS_TOKEN || process.env.ISCONL_TOKEN || secretStore.get('OPS_TOKEN') || '';
   if (!token) return false;
   const auth = req.headers.authorization || '';
@@ -48,10 +55,15 @@ async function main() {
   console.log(`  secrets: ${secretsResult.source}, ${secretsResult.count} key(s)`);
 
   const auditLog = createAuditLog({ logsDir: LOGS_DIR });
+  _devAuthBypassLog = auditLog;
   const opsVm = createOpsVm();
 
   const tokenConfigured = !!(process.env.OPS_TOKEN || process.env.ISCONL_TOKEN || secretStore.get('OPS_TOKEN'));
   const isLoopback = ['127.0.0.1', '::1', 'localhost'].includes(BIND);
+  if (process.env.ISCONL_DEV_NO_AUTH === '1' && !isLoopback) {
+    console.error('  REFUSING TO BIND: ISCONL_DEV_NO_AUTH is set but BIND is not loopback -- dev auth bypass is loopback-only.');
+    process.exit(1);
+  }
   if (!isLoopback && !tokenConfigured) {
     console.error('  REFUSING TO BIND: no OPS_TOKEN/ISCONL_TOKEN configured and BIND is not loopback.');
     process.exit(1);
