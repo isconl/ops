@@ -9,8 +9,20 @@
 FROM node:20-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates docker.io docker-compose-plugin git \
+    ca-certificates docker.io git curl \
     && rm -rf /var/lib/apt/lists/*
+
+# docker-compose-plugin isn't in Debian's own apt repo (only docker.io's CLI
+# is) -- pulled directly from the compose project's own GitHub releases
+# instead of adding Docker's apt repo just for this one binary, same
+# "fewer moving parts outside this repo's own control" reasoning the fleet's
+# CI workflows already use for gitleaks. Pinned version + arch-detected
+# (this fleet's VM is arm64/Ampere; local dev boxes may be amd64).
+RUN mkdir -p /usr/libexec/docker/cli-plugins \
+    && ARCH=$(uname -m) \
+    && curl -sSfL "https://github.com/docker/compose/releases/download/v2.29.7/docker-compose-linux-${ARCH}" \
+       -o /usr/libexec/docker/cli-plugins/docker-compose \
+    && chmod +x /usr/libexec/docker/cli-plugins/docker-compose
 
 WORKDIR /app
 ENV NODE_ENV=production
