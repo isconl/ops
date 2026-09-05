@@ -27,6 +27,13 @@ RUN mkdir -p /usr/libexec/docker/cli-plugins \
 WORKDIR /app
 ENV NODE_ENV=production
 
+# The read-only sibling-repos mount is owned by the HOST user (uid 1000 on
+# the VM), while this container runs as root (uid 0) -- git's own ownership
+# safety check refuses to touch a repo it doesn't own unless told it's
+# expected. Only affects lib/ops-vm.js's read-only `git log`/`rev-parse`
+# calls for deploy status, nothing destructive.
+RUN git config --global --add safe.directory '*'
+
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
 
