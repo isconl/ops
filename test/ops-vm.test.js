@@ -3,7 +3,7 @@ const { test } = require('node:test');
 const assert = require('node:assert');
 const { createOpsVm, parseComposeConfig, groupBy } = require('../lib/ops-vm');
 
-// BI26091401: the managed set used to be a hardcoded array. These tests
+// BI26091501: the managed set used to be a hardcoded array. These tests
 // cover the pure discovery logic (parseComposeConfig/groupBy) directly,
 // with no real `docker` binary needed -- the same reasoning BI26091301's
 // discoverProjects tests already used: separate the discovery/grouping
@@ -104,7 +104,7 @@ test('status resolves containers via the compose service name, not a hardcoded c
   assert.doesNotMatch(src, /docker'.*'inspect', `isconl-\$\{name\}`/, 'containerState must not hardcode an `isconl-<name>` container name');
 });
 
-test('the managed set is no longer a literal in the source -- discovery reads docker compose config, not a hardcoded array (BI26091401 regression)', () => {
+test('the managed set is no longer a literal in the source -- discovery reads docker compose config, not a hardcoded array (BI26091501 regression)', () => {
   const src = require('fs').readFileSync(require('path').join(__dirname, '../lib/ops-vm.js'), 'utf8');
   assert.doesNotMatch(src, /MANAGED_SERVICES\s*=\s*\[/, 'no fixed service-name array should exist');
   assert.match(src, /compose\(\['config', '--format', 'json'\]\)/, 'discovery must call `docker compose config`');

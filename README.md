@@ -18,7 +18,7 @@ after entry to its own hash-chained audit log before executing.
 
 `:name` must be a service `docker compose config` reports for the live
 compose file (see `OPS_COMPOSE_FILE` below) -- discovered live, not a
-fixed list (BI26091401). Each service optionally declares its own group
+fixed list (BI26091501). Each service optionally declares its own group
 via an `ops.group` compose label, e.g.:
 
 ```yaml
