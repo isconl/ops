@@ -14,6 +14,7 @@ const path = require('path');
 const secretStore = require('../lib/secrets');
 const { createAuditLog } = require('../lib/audit');
 const { createOpsVm } = require('../lib/ops-vm');
+const { createMachineRegistry } = require('../lib/machines');
 const manifest = require('../lib/manifest');
 
 const PORT = parseInt(process.env.OPS_PORT || process.env.PORT || '8087', 10);
@@ -57,6 +58,24 @@ async function main() {
   const auditLog = createAuditLog({ logsDir: LOGS_DIR });
   _devAuthBypassLog = auditLog;
   const opsVm = createOpsVm();
+
+  // BI26091506: the machine registry -- additive, does not replace the
+  // single-machine opsVm above (every existing route below is unchanged,
+  // still scoped to whichever machine ops itself runs on, so the existing
+  // hub UI keeps working exactly as before; the multi-machine UI is
+  // PI26091504's job, not this row's). OCI credentials are read key-only
+  // via secretStore, same pattern every other engine's secret access
+  // uses -- if any field is missing, the registry falls back to
+  // declared-machines-only and reports discoveryOk:false, never throws.
+  const machineRegistry = createMachineRegistry({
+    ociCreds: {
+      tenancyOcid: process.env.OCI_TENANCY_OCID || secretStore.get('OCI_TENANCY_OCID') || '',
+      userOcid: process.env.OCI_USER_OCID || secretStore.get('OCI_USER_OCID') || '',
+      fingerprint: process.env.OCI_FINGERPRINT || secretStore.get('OCI_FINGERPRINT') || '',
+      region: process.env.OCI_REGION || secretStore.get('OCI_REGION') || '',
+      privateKeyPem: process.env.OCI_PRIVATE_KEY || secretStore.get('OCI_PRIVATE_KEY') || '',
+    },
+  });
 
   const tokenConfigured = !!(process.env.OPS_TOKEN || process.env.ISCONL_TOKEN || secretStore.get('OPS_TOKEN'));
   const isLoopback = ['127.0.0.1', '::1', 'localhost'].includes(BIND);
@@ -127,6 +146,69 @@ async function main() {
 
       if (pathname === '/deploy/status' && req.method === 'GET') {
         return sendJson(res, 200, await opsVm.deployStatus());
+      }
+
+      // BI26091506: multi-machine surface. GET /machines is the real
+      // machine list (declared + live OCI poll, merged) -- "visible and
+      // manageable" per Sconl's own framing; everything below is the
+      // "manageable" half, scoped to one named machine at a time.
+      if (pathname === '/machines' && req.method === 'GET') {
+        return sendJson(res, 200, await machineRegistry.listMachines());
+      }
+
+      const NO_CONNECTION = (id) => ({ ok: false, error: `no connection info declared for machine "${id}" -- observable via GET /machines only` });
+
+      const machineStatusMatch = pathname.match(/^\/machines\/([^/]+)\/status$/);
+      if (machineStatusMatch && req.method === 'GET') {
+        const vm = machineRegistry.opsVmFor(decodeURIComponent(machineStatusMatch[1]));
+        if (!vm) return sendJson(res, 200, { services: [], groups: {}, ungrouped: [], discoveryOk: false, discoveryError: NO_CONNECTION(machineStatusMatch[1]).error });
+        return sendJson(res, 200, await vm.status());
+      }
+
+      const machineLogsMatch = pathname.match(/^\/machines\/([^/]+)\/logs\/([a-z][a-z0-9-]*)$/);
+      if (machineLogsMatch && req.method === 'GET') {
+        const [, machineId, name] = machineLogsMatch;
+        const vm = machineRegistry.opsVmFor(decodeURIComponent(machineId));
+        if (!vm) return sendJson(res, 400, NO_CONNECTION(machineId));
+        return sendJson(res, 200, await vm.logsTail(name, url.searchParams.get('lines')));
+      }
+
+      const machineDeployMatch = pathname.match(/^\/machines\/([^/]+)\/deploy\/status$/);
+      if (machineDeployMatch && req.method === 'GET') {
+        const vm = machineRegistry.opsVmFor(decodeURIComponent(machineDeployMatch[1]));
+        if (!vm) return sendJson(res, 200, { services: [], discoveryOk: false, discoveryError: NO_CONNECTION(machineDeployMatch[1]).error });
+        return sendJson(res, 200, await vm.deployStatus());
+      }
+
+      const machineServiceMatch = pathname.match(/^\/machines\/([^/]+)\/service\/([a-z][a-z0-9-]*)\/(restart|start|stop|destroy)$/);
+      if (machineServiceMatch && req.method === 'POST') {
+        const [, machineId, name, action] = machineServiceMatch;
+        const vm = machineRegistry.opsVmFor(decodeURIComponent(machineId));
+        // No connection info at all is a stricter, more basic wall than
+        // per-service ops.control: there is no compose file to read
+        // isManaged/isControllable from in the first place, so this can
+        // never fall through to a real action for an unreachable machine
+        // -- the same "fails closed" property the row asks for, at the
+        // machine level rather than the service level.
+        if (!vm) return sendJson(res, 400, NO_CONNECTION(machineId));
+
+        if (!(await vm.isManaged(name))) {
+          return sendJson(res, 400, { ok: false, error: `"${name}" is not a managed service on machine "${machineId}"` });
+        }
+
+        let body = {};
+        if (action === 'destroy') {
+          const bodyText = await readBody(req);
+          body = bodyText ? JSON.parse(bodyText) : {};
+          if (body.confirm !== name) {
+            return sendJson(res, 400, { ok: false, error: `destroy requires {"confirm":"${name}"} in the request body` });
+          }
+        }
+
+        const before = auditLog.log('ops_service_action_start', { machine: machineId, service: name, action });
+        const result = await vm.serviceAction(name, action);
+        auditLog.log('ops_service_action_done', { machine: machineId, service: name, action, ok: result.ok, code: result.code, traceHash: before.hash });
+        return sendJson(res, result.ok ? 200 : 502, result);
       }
     } catch (e) {
       return sendJson(res, 400, { success: false, error: String(e.message || e) });

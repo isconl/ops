@@ -1,0 +1,2 @@
+ID	NAME	PROVIDER	OCI_INSTANCE_ID	COMPOSE_FILE	REPOS_DIR
+isconl-vault-a1	isconl-vault-a1	oci		~/isconl-docker/deploy/docker-compose.vm.yml	~/isconl-docker
