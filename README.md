@@ -32,6 +32,25 @@ A service with no `ops.group` label still appears (grouped as
 "ungrouped" in `GET /status`'s response), never silently. ops does not
 manage itself.
 
+**Observable by default, controllable by opt-in.** Appearing in
+`GET /status` never implies `restart`/`start`/`stop`/`destroy` is
+allowed -- a service must separately declare `ops.control: "true"` to
+accept those. Anything else (no label, a different value, a real
+boolean instead of the string `"true"`) fails closed to read-only:
+
+```yaml
+services:
+  vault:
+    labels:
+      - "ops.group=iSconl"
+      - "ops.control=true"
+```
+
+`iSconl` is the one group that opts in; anything newer (qpress/qpages/
+aquifer/aria) stays observe-only until someone deliberately turns it on
+for that group's services. `GET /status` reports each service's
+`controllable` flag alongside its group.
+
 ## Local dev
 
 ```
