@@ -42,3 +42,14 @@ test('status reports one entry per managed service without crashing, whatever co
   assert.equal(services.length, MANAGED_SERVICES.length);
   for (const s of services) assert.equal(typeof s.running, 'boolean');
 });
+
+test('status resolves containers via the compose service name, not a hardcoded container_name guess (FI26091401 regression)', () => {
+  // A compose-file change that drops/renames an explicit `container_name`
+  // (e.g. the 12 Sep qspace-* services addition) must not make a managed
+  // service silently read as absent while `docker compose logs <service>`
+  // keeps working. Assert the source itself, since there is no live
+  // compose file to exercise the real resolver against from this machine.
+  const src = require('fs').readFileSync(require('path').join(__dirname, '../lib/ops-vm.js'), 'utf8');
+  assert.match(src, /compose\(\['ps', '-q', name\]\)/, 'containerState must resolve via `docker compose ps -q <service>`');
+  assert.doesNotMatch(src, /docker'.*'inspect', `isconl-\$\{name\}`/, 'containerState must not hardcode an `isconl-<name>` container name');
+});
