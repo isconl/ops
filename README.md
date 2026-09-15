@@ -16,8 +16,20 @@ after entry to its own hash-chained audit log before executing.
 - `POST /service/:name/destroy` -- body must be `{"confirm":"<name>"}`
 - `GET /deploy/status` -- per-service running commit + last-deployed time
 
-`:name` must be one of `vault`, `pulse`, `scope`, `circle`, `spark`,
-`media`, `hub` -- see `lib/ops-vm.js`'s `MANAGED_SERVICES`. ops does not
+`:name` must be a service `docker compose config` reports for the live
+compose file (see `OPS_COMPOSE_FILE` below) -- discovered live, not a
+fixed list (BI26091401). Each service optionally declares its own group
+via an `ops.group` compose label, e.g.:
+
+```yaml
+services:
+  vault:
+    labels:
+      - "ops.group=iSconl"
+```
+
+A service with no `ops.group` label still appears (grouped as
+"ungrouped" in `GET /status`'s response), never silently. ops does not
 manage itself.
 
 ## Local dev

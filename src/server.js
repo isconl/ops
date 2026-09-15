@@ -90,16 +90,16 @@ async function main() {
         return sendJson(res, 200, await opsVm.vmStats());
       }
 
-      const logsMatch = pathname.match(/^\/logs\/([a-z]+)$/);
+      const logsMatch = pathname.match(/^\/logs\/([a-z][a-z0-9-]*)$/);
       if (logsMatch && req.method === 'GET') {
         return sendJson(res, 200, await opsVm.logsTail(logsMatch[1], url.searchParams.get('lines')));
       }
 
-      const serviceMatch = pathname.match(/^\/service\/([a-z]+)\/(restart|start|stop|destroy)$/);
+      const serviceMatch = pathname.match(/^\/service\/([a-z][a-z0-9-]*)\/(restart|start|stop|destroy)$/);
       if (serviceMatch && req.method === 'POST') {
         const [, name, action] = serviceMatch;
 
-        if (!opsVm.isManaged(name)) {
+        if (!(await opsVm.isManaged(name))) {
           return sendJson(res, 400, { ok: false, error: `"${name}" is not a managed service` });
         }
 
