@@ -15,6 +15,7 @@ const secretStore = require('../lib/secrets');
 const { createAuditLog } = require('../lib/audit');
 const { createOpsVm } = require('../lib/ops-vm');
 const { createMachineRegistry } = require('../lib/machines');
+const { createMetricsCollector } = require('../lib/metrics');
 const manifest = require('../lib/manifest');
 
 const PORT = parseInt(process.env.OPS_PORT || process.env.PORT || '8087', 10);
@@ -76,6 +77,16 @@ async function main() {
       privateKeyPem: process.env.OCI_PRIVATE_KEY || secretStore.get('OCI_PRIVATE_KEY') || '',
     },
   });
+
+  // BI26091904: metrics ring buffer for the ops dashboard's time-series
+  // charts. Only ever samples declared+controllable machines (see
+  // metrics.js's own header for why -- vmStats() has no way to report a
+  // number for a machine it can't locally exec against). Hydrate each
+  // declared machine's ring from yesterday's/today's NDJSON before the
+  // first sample, so a restart doesn't show an empty chart.
+  const metrics = createMetricsCollector({ listMachines: machineRegistry.listMachines, opsVmFor: machineRegistry.opsVmFor });
+  for (const m of machineRegistry.loadDeclaredMachines()) metrics.hydrateFromDisk(m.id);
+  metrics.start();
 
   const tokenConfigured = !!(process.env.OPS_TOKEN || process.env.ISCONL_TOKEN || secretStore.get('OPS_TOKEN'));
   const isLoopback = ['127.0.0.1', '::1', 'localhost'].includes(BIND);
@@ -178,6 +189,15 @@ async function main() {
         const vm = machineRegistry.opsVmFor(decodeURIComponent(machineDeployMatch[1]));
         if (!vm) return sendJson(res, 200, { services: [], discoveryOk: false, discoveryError: NO_CONNECTION(machineDeployMatch[1]).error });
         return sendJson(res, 200, await vm.deployStatus());
+      }
+
+      // BI26091904: 24h metrics history for one machine's dashboard charts.
+      // Empty array (not an error) for a machine never sampled -- either
+      // it's genuinely new, or it's declared-but-not-controllable/
+      // undeclared, in which case it will always be empty (see metrics.js).
+      const machineMetricsMatch = pathname.match(/^\/machines\/([^/]+)\/metrics$/);
+      if (machineMetricsMatch && req.method === 'GET') {
+        return sendJson(res, 200, { samples: metrics.history(decodeURIComponent(machineMetricsMatch[1])) });
       }
 
       const machineServiceMatch = pathname.match(/^\/machines\/([^/]+)\/service\/([a-z][a-z0-9-]*)\/(restart|start|stop|destroy)$/);
